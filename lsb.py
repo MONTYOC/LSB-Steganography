@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
+from math import log10, sqrt
 import sys
 import os  # Import the os module
 
@@ -17,12 +18,42 @@ def bits_to_text(bits):
         chars.append(chr(int(byte, 2)))
     return ''.join(chars)
 
+def calculate_psnr(original_image_path, stego_image_path):
+    """Calculates the PSNR between the original and stego images."""
+    try:
+        original_img = Image.open(original_image_path).convert("RGB")
+        stego_img = Image.open(stego_image_path).convert("RGB")
+        original_data = list(original_img.getdata()) # type: ignore
+        stego_data = list(stego_img.getdata()) #type: ignore
+
+        if len(original_data) != len(stego_data):
+            print("Original and stego images have different dimensions.")
+            return None
+
+        mse_sum = 0
+        for i in range(len(original_data)):
+            r1, g1, b1 = original_data[i]
+            r2, g2, b2 = stego_data[i]
+            mse_sum += (r1 - r2) ** 2
+            mse_sum += (g1 - g2) ** 2
+            mse_sum += (b1 - b2) ** 2
+
+        mse = mse_sum / (len(original_data) * 3)
+
+        if mse == 0:
+            return float('inf')  # Perfect match
+        psnr = 10 * log10((255 ** 2) / mse)
+        return psnr
+    except Exception as e:
+        print(f"Error calculating PSNR: {e}")
+        return None
+
 def embed_text_on_image(image_path, message):
     """Embeds text into the least significant bits of an image."""
     try:
         img = Image.open(image_path).convert("RGB")
         width, height = img.size
-        data = list(img.getdata())
+        data = list(img.getdata()) # type: ignore
         binary_message = text_to_bits(message + "#####END#####") # Add a delimiter
         message_index = 0
 
@@ -30,27 +61,45 @@ def embed_text_on_image(image_path, message):
             raise ValueError("Text is too long to hide in this image.")
 
         modified_data = []
+        bit_changes = 0  # Track the number of bits changed
         for pixel in data:
             r, g, b = pixel
             if message_index < len(binary_message):
-                r = (r & ~1) | int(binary_message[message_index])
+                new_r = (r & ~1) | int(binary_message[message_index])
+                bit_changes += (new_r != r)
+                r = new_r
                 message_index += 1
             if message_index < len(binary_message):
-                g = (g & ~1) | int(binary_message[message_index])
+                new_g = (g & ~1) | int(binary_message[message_index])
+                bit_changes += (new_g != g)
+                g = new_g
                 message_index += 1
             if message_index < len(binary_message):
-                b = (b & ~1) | int(binary_message[message_index])
+                new_b = (b & ~1) | int(binary_message[message_index])
+                bit_changes += (new_b != b)
+                b = new_b
                 message_index += 1
             modified_data.append((r, g, b))
 
         filename = os.path.basename(image_path)  # Extract the filename
-        new_filename = "Embedded-" + filename # Use only the filename
+        new_filename = "E" + filename # Use only the filename
 
         modified_img = Image.new("RGB", (width, height))
         modified_img.putdata(modified_data)
         modified_img.save(new_filename, "PNG")
-        messagebox.showinfo("Embedding Successful", f"Message embedded. Saved as '{new_filename}'")
+        psnr = calculate_psnr(image_path, new_filename)
+        if psnr is not None:
+            messagebox.showinfo("Embedding Successful", f"Text successfully encoded into '{new_filename}'\nPSNR: {psnr:.2f} dB\nBits changed: {bit_changes}")
+            print(f"Text successfully encoded into '{new_filename}'")
+            print(f"PSNR: {psnr:.2f} dB")
+            print(f"Bits changed: {bit_changes}")
+        else:
+            messagebox.showinfo("Embedding Successful", f"Text successfully encoded into '{new_filename}'\nPSNR calculation failed.\nBits changed: {bit_changes}")
+            print(f"Text successfully encoded into '{new_filename}'")
+            print("PSNR calculation failed.")
+            print(f"Bits changed: {bit_changes}")
         print(f"Text successfully encoded into '{new_filename}'")
+        print(f"Bits changed: {bit_changes}")
         return new_filename
 
     except FileNotFoundError:
@@ -68,7 +117,7 @@ def extract_text_from_image(image_path):
     try:
         img = Image.open(image_path).convert("RGB")
         width, height = img.size
-        data = list(img.getdata())
+        data = list(img.getdata()) # type: ignore
         binary_message = ""
 
         for pixel in data:
@@ -89,7 +138,16 @@ def extract_text_from_image(image_path):
             else:
                 break
 
-        messagebox.showinfo("Extraction Successful", f"Extracted Message: '{decoded_text}'")
+        original_image_path = filedialog.askopenfilename(title="Select Original Image for PSNR Calculation", filetypes=[("Image files", "*.png")])
+        if original_image_path:
+            psnr = calculate_psnr(original_image_path, image_path)
+            if psnr is not None:
+                messagebox.showinfo("Extraction Successful", f"Extracted Message: '{decoded_text}'\nPSNR: {psnr:.2f} dB")
+                print(f"PSNR: {psnr:.2f} dB")
+            else:
+                messagebox.showinfo("Extraction Successful", f"Extracted Message: '{decoded_text}'\nPSNR calculation failed.")
+        else:
+            messagebox.showinfo("Extraction Successful", f"Extracted Message: '{decoded_text}'")
         print(f"Decoded text: '{decoded_text}'")
         return decoded_text
 
@@ -109,25 +167,25 @@ def run_embedding_gui():
             img.thumbnail((200, 200))
             photo = ImageTk.PhotoImage(img)
             left_square.create_image(100, 100, image=photo)
-            left_square.image = photo
-            root.image_path = filepath  # Store the image path
+            left_square.image = photo # type: ignore
+            root.image_path = filepath  # type: ignore # Store the image path
 
     def get_message():
         message = simpledialog.askstring("Embed Message", "Enter the message to embed:")
         if message:
-            root.message_to_embed = message
+            root.message_to_embed = message # type: ignore
 
     def embed_interactive():
         if hasattr(root, 'image_path') and hasattr(root, 'message_to_embed'):
-            embed_text_on_image(root.image_path, root.message_to_embed)
+            embed_text_on_image(root.image_path, root.message_to_embed) # type: ignore
         else:
             messagebox.showerror("Error", "Please select an image and enter a message.")
 
     root = tk.Tk()
     root.title("Interactive Embedding Tool (LSB)")
     root.configure(bg="gray")
-    root.image_path = None
-    root.message_to_embed = None
+    root.image_path = None # type: ignore
+    root.message_to_embed = None # type: ignore
 
     left_square = tk.Canvas(root, width=200, height=200, bg="white")
     left_square.grid(row=0, column=0, padx=10, pady=10)
@@ -159,19 +217,19 @@ def run_extraction_gui():
             img.thumbnail((200, 200))
             photo = ImageTk.PhotoImage(img)
             left_square.create_image(100, 100, image=photo)
-            left_square.image = photo
-            root.image_path = filepath
+            left_square.image = photo # type: ignore
+            root.image_path = filepath # type: ignore
 
     def extract_interactive():
         if hasattr(root, 'image_path'):
-            extract_text_from_image(root.image_path)
+            extract_text_from_image(root.image_path) # type: ignore
         else:
             messagebox.showerror("Error", "Please select an image.")
 
     root = tk.Tk()
     root.title("Interactive Extraction Tool (LSB)")
     root.configure(bg="gray")
-    root.image_path = None
+    root.image_path = None # type: ignore
 
     left_square = tk.Canvas(root, width=200, height=200, bg="white")
     left_square.grid(row=0, column=0, padx=10, pady=10)
@@ -194,12 +252,25 @@ def run_extraction_gui():
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1].lower() == "-e":
-            if len(sys.argv) >= 5 and sys.argv[2].lower() == "-i" and sys.argv[4].lower() == "-m":
+            if len(sys.argv) >= 5 and sys.argv[2].lower() == "-i":
                 image_file = sys.argv[3]
-                message_to_embed = sys.argv[5].strip('"')
-                embed_text_on_image(image_file, message_to_embed)
+                if sys.argv[4].lower() == "-m":
+                    message_to_embed = sys.argv[5].strip('"')
+                    embed_text_on_image(image_file, message_to_embed)
+                elif sys.argv[4].lower() == "-f":
+                    file_path = sys.argv[5]
+                    try:
+                        with open(file_path, 'r') as file:
+                            message_to_embed = file.read()
+                        embed_text_on_image(image_file, message_to_embed)
+                    except FileNotFoundError:
+                        print(f"Error: File '{file_path}' not found.")
+                    except Exception as e:
+                        print(f"Error reading file: {e}")
+                else:
+                    print("Usage for embedding: python lsb.py -e -i <image.png> -m \"your message\" or -f <file.txt>")
             else:
-                print("Usage for embedding: python lsb.py -e -i <image.png> -m \"your message\"")
+                print("Usage for embedding: python lsb.py -e -i <image.png> -m \"your message\" or -f <file.txt>")
         elif sys.argv[1].lower() == "-x":
             if len(sys.argv) >= 3 and sys.argv[2].lower() == "-i":
                 image_file = sys.argv[3]
