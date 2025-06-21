@@ -82,7 +82,7 @@ def embed_text_on_image(image_path, message):
             modified_data.append((r, g, b))
 
         filename = os.path.basename(image_path)  # Extract the filename
-        new_filename = "E" + filename # Use only the filename
+        new_filename = "Stego" + filename # Use only the filename
 
         modified_img = Image.new("RGB", (width, height))
         modified_img.putdata(modified_data)
